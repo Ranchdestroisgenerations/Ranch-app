@@ -212,6 +212,33 @@
   .summary-pill.ok{background:rgba(122,138,99,0.12); color:var(--sage); border-color:rgba(122,138,99,0.3);}
   .summary-pill.overdue{background:rgba(166,61,51,0.16); color:#e08276; border-color:rgba(166,61,51,0.4);}
   .summary-pill .n{font-size:1rem;}
+
+  .feed-banner{
+    border-radius:10px;
+    padding:14px 16px;
+    margin-bottom:14px;
+    border:1px solid var(--wood-line);
+  }
+  .feed-banner.ok{background:rgba(122,138,99,0.12); border-color:rgba(122,138,99,0.3);}
+  .feed-banner.warn{background:rgba(212,167,44,0.14); border-color:rgba(212,167,44,0.4);}
+  .feed-banner.overdue{background:rgba(166,61,51,0.16); border-color:rgba(166,61,51,0.4);}
+  .feed-banner .big{font-size:1.05rem; font-weight:700; margin-bottom:2px;}
+  .feed-banner.ok .big{color:var(--sage);}
+  .feed-banner.warn .big{color:var(--hay);}
+  .feed-banner.overdue .big{color:#e08276;}
+  .feed-banner .small{font-size:0.78rem; color:var(--cream-dim);}
+  .feed-quick-btn{
+    margin-top:10px;
+    width:100%;
+    padding:12px;
+    border-radius:8px;
+    border:none;
+    background:var(--hay);
+    color:var(--wood-dark);
+    font-weight:700;
+    font-size:0.9rem;
+    cursor:pointer;
+  }
   .check-btn{
     position:absolute; top:12px; right:38px;
     width:20px; height:20px;
@@ -390,6 +417,7 @@
   <button class="tab-btn" data-tab="depenses">Dépenses</button>
   <button class="tab-btn" data-tab="taches">Tâches</button>
   <button class="tab-btn" data-tab="recoltes">Récoltes</button>
+  <button class="tab-btn" data-tab="nourrissage">Nourrissage</button>
 </div>
 
 <main>
@@ -413,6 +441,12 @@
   <section class="panel" id="panel-recoltes">
     <div class="section-title">Récoltes <span class="count-badge" id="count-recoltes">0</span></div>
     <div id="list-recoltes"></div>
+  </section>
+
+  <section class="panel" id="panel-nourrissage">
+    <div class="section-title">Nourrissage <span class="count-badge" id="count-nourrissage">0</span></div>
+    <div id="summary-nourrissage"></div>
+    <div id="list-nourrissage"></div>
   </section>
 
 </main>
@@ -448,7 +482,8 @@ const STORE = {
   cheptel: "ranch3g:cheptel",
   depenses: "ranch3g:depenses",
   taches: "ranch3g:taches",
-  recoltes: "ranch3g:recoltes"
+  recoltes: "ranch3g:recoltes",
+  nourrissage: "ranch3g:nourrissage"
 };
 
 // Persistence layer — Firestore is the source of truth (synced in real time
@@ -478,7 +513,7 @@ const storage = {
   }
 };
 
-let state = { cheptel: [], depenses: [], taches: [], recoltes: [] };
+let state = { cheptel: [], depenses: [], taches: [], recoltes: [], nourrissage: [] };
 let currentTab = "cheptel";
 
 async function loadAll(){
@@ -568,6 +603,7 @@ function renderAll(){
   renderDepenses();
   renderTaches();
   renderRecoltes();
+  renderNourrissage();
 }
 
 function vaccinStatus(dateStr, label){
@@ -676,13 +712,75 @@ function renderRecoltes(){
   `).join('');
 }
 
+function timeAgoLabel(iso){
+  const then = new Date(iso);
+  const diffMin = Math.round((Date.now() - then.getTime())/60000);
+  if(diffMin < 1) return "à l'instant";
+  if(diffMin < 60) return `il y a ${diffMin} min`;
+  const diffH = Math.floor(diffMin/60);
+  const remMin = diffMin % 60;
+  if(diffH < 24) return `il y a ${diffH} h${remMin? ' '+remMin+' min':''}`;
+  const diffJ = Math.floor(diffH/24);
+  return `il y a ${diffJ} j`;
+}
+
+function renderNourrissageSummary(){
+  const el = document.getElementById('summary-nourrissage');
+  if(state.nourrissage.length === 0){ el.innerHTML=''; return; }
+  const sorted = [...state.nourrissage].sort((a,b)=> new Date(b.horodatage) - new Date(a.horodatage));
+  const last = sorted[0];
+  const diffH = (Date.now() - new Date(last.horodatage).getTime())/3600000;
+  let level = 'ok';
+  if(diffH >= 14) level = 'overdue';
+  else if(diffH >= 10) level = 'warn';
+  el.innerHTML = `<div class="feed-banner ${level}">
+    <div class="big">${level==='overdue'?'⚠️ ':level==='warn'?'⏰ ':'✅ '}Dernière nourriture : ${timeAgoLabel(last.horodatage)}</div>
+    <div class="small">Par ${esc(last.personne)}${last.notes? ' · '+esc(last.notes):''}</div>
+    <button class="feed-quick-btn" onclick="openNourrissageForm()">🌾 Enregistrer un nourrissage</button>
+  </div>`;
+}
+
+function renderNourrissage(){
+  const list = document.getElementById("list-nourrissage");
+  document.getElementById("count-nourrissage").textContent = state.nourrissage.length;
+  renderNourrissageSummary();
+  if(state.nourrissage.length === 0){
+    list.innerHTML = `<div class="empty-state">Aucun nourrissage enregistré. Touchez + pour en ajouter un.</div>`;
+    return;
+  }
+  const sorted = [...state.nourrissage].sort((a,b)=> new Date(b.horodatage) - new Date(a.horodatage));
+  list.innerHTML = sorted.map(n => `
+    <div class="card">
+      <button class="del-btn" onclick="removeItem('nourrissage','${n.id}')">✕</button>
+      <div class="card-title">🌾 ${esc(n.personne)}</div>
+      <div class="card-meta">${formatDT(n.horodatage)}${n.notes? ' · '+esc(n.notes):''}</div>
+    </div>
+  `).join('');
+}
+
+function formatDT(iso){
+  const d = new Date(iso);
+  return d.toLocaleString('fr-CA', {dateStyle:'short', timeStyle:'short'});
+}
+
 function esc(s){
   if(s===undefined || s===null) return '';
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function escAttr(s){ return esc(s); }
 
+const DELETE_LABELS = {
+  cheptel: (x)=> `la bête « ${x.nom||'sans nom'} »`,
+  depenses: (x)=> `la dépense « ${x.description||''} »`,
+  taches: (x)=> `la tâche « ${x.titre||''} »`,
+  recoltes: (x)=> `la récolte « ${x.type||''} »`,
+  nourrissage: (x)=> `cet enregistrement de nourrissage`
+};
+
 window.removeItem = async function(key, id){
+  const item = state[key].find(x=>x.id===id);
+  const label = item && DELETE_LABELS[key] ? DELETE_LABELS[key](item) : 'cet élément';
+  if(!confirm(`Supprimer ${label} ? Cette action est irréversible.`)) return;
   state[key] = state[key].filter(x=>x.id!==id);
   await save(key);
   renderAll();
@@ -723,6 +821,7 @@ document.getElementById('fab-add').addEventListener('click', ()=>{
   else if(currentTab==='depenses') openDepenseForm();
   else if(currentTab==='taches') openTacheForm();
   else if(currentTab==='recoltes') openRecolteForm();
+  else if(currentTab==='nourrissage') openNourrissageForm();
 });
 
 function openCheptelForm(editId){
@@ -887,6 +986,47 @@ window.submitRecolte = async function(){
   closeModal();
 };
 
+function localDatetimeValue(){
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0,16);
+}
+
+function openNourrissageForm(){
+  const pastNames = [...new Set(state.nourrissage.map(n=>n.personne).filter(Boolean))];
+  openModal(`
+    <h3>Enregistrer un nourrissage</h3>
+    <label>Qui nourrit ?</label>
+    <input id="f-personne" list="personne-suggestions" placeholder="Votre nom">
+    <datalist id="personne-suggestions">
+      ${pastNames.map(n=>`<option value="${escAttr(n)}">`).join('')}
+    </datalist>
+    <label>Date et heure</label>
+    <input id="f-horodatage" type="datetime-local" value="${localDatetimeValue()}">
+    <label>Notes (optionnel)</label>
+    <input id="f-fnotes" placeholder="Ex. Ration double, chevaux inclus">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="submitNourrissage()">Enregistrer</button>
+    </div>
+  `);
+}
+window.openNourrissageForm = openNourrissageForm;
+window.submitNourrissage = async function(){
+  const personne = document.getElementById('f-personne').value.trim();
+  const dtLocal = document.getElementById('f-horodatage').value;
+  if(!personne || !dtLocal) return;
+  state.nourrissage.push({
+    id: cryptoId(),
+    personne,
+    horodatage: new Date(dtLocal).toISOString(),
+    notes: document.getElementById('f-fnotes').value.trim()
+  });
+  await save('nourrissage');
+  renderNourrissage();
+  closeModal();
+};
+
 // Auth gating
 const loginScreen = document.getElementById('login-screen');
 const appRoot = document.getElementById('app-root');
@@ -955,10 +1095,12 @@ document.getElementById('file-import').addEventListener('change', async (e)=>{
     if(data.depenses) state.depenses = data.depenses;
     if(data.taches) state.taches = data.taches;
     if(data.recoltes) state.recoltes = data.recoltes;
+    if(data.nourrissage) state.nourrissage = data.nourrissage;
     await save('cheptel');
     await save('depenses');
     await save('taches');
     await save('recoltes');
+    await save('nourrissage');
     renderAll();
     alert('Données restaurées avec succès.');
   }catch(err){
